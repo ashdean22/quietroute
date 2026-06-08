@@ -10,8 +10,12 @@ interface InputPanelProps {
   setActivity: (v: 'run' | 'bike') => void
   vibes: string[]
   setVibes: (v: string[]) => void
+  hasRoute: boolean
+  loading: boolean
+  error: string | null
   onUseMyLocation: () => void
   onFindRoutes: () => void
+  onRegenerate: () => void
 }
 
 export default function InputPanel({
@@ -22,8 +26,12 @@ export default function InputPanel({
   setActivity,
   vibes,
   setVibes,
+  hasRoute,
+  loading,
+  error,
   onUseMyLocation,
   onFindRoutes,
+  onRegenerate,
 }: InputPanelProps) {
   const toggleVibe = (vibe: string) => {
     setVibes(
@@ -42,7 +50,8 @@ export default function InputPanel({
         <p className="text-sm font-medium text-gray-700">Start point</p>
         <button
           onClick={onUseMyLocation}
-          className="w-full flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Use my location
         </button>
@@ -81,7 +90,8 @@ export default function InputPanel({
             <button
               key={type}
               onClick={() => setActivity(type)}
-              className={`flex-1 py-2.5 text-sm font-medium transition-colors capitalize ${
+              disabled={loading}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors capitalize disabled:opacity-50 ${
                 activity === type
                   ? 'bg-indigo-600 text-white'
                   : 'bg-white text-gray-600 hover:bg-gray-50'
@@ -100,7 +110,8 @@ export default function InputPanel({
             <button
               key={vibe}
               onClick={() => toggleVibe(vibe)}
-              className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              disabled={loading}
+              className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors disabled:opacity-50 ${
                 vibes.includes(vibe)
                   ? 'bg-indigo-600 text-white'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -112,13 +123,36 @@ export default function InputPanel({
         </div>
       </div>
 
-      <button
-        onClick={onFindRoutes}
-        disabled={!startPoint}
-        className="mt-auto w-full rounded-xl py-3 text-sm font-semibold transition-colors bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        Find routes
-      </button>
+      {error && (
+        <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
+      )}
+
+      <div className="mt-auto flex flex-col gap-2">
+        <button
+          onClick={onFindRoutes}
+          disabled={!startPoint || loading}
+          className="w-full rounded-xl py-3 text-sm font-semibold transition-colors bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        >
+          {loading ? (
+            <>
+              <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              Finding route...
+            </>
+          ) : (
+            'Find routes'
+          )}
+        </button>
+
+        {hasRoute && (
+          <button
+            onClick={onRegenerate}
+            disabled={loading}
+            className="w-full rounded-xl py-3 text-sm font-semibold transition-colors bg-white text-indigo-600 border border-indigo-300 hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Regenerate
+          </button>
+        )}
+      </div>
     </aside>
   )
 }

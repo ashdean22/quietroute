@@ -15,6 +15,10 @@ export default function Home() {
   const [distance, setDistance] = useState(5)
   const [activity, setActivity] = useState<'run' | 'bike'>('run')
   const [vibes, setVibes] = useState<string[]>([])
+  const [seed, setSeed] = useState(1)
+  const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const handleMapClick = useCallback((latlng: [number, number]) => {
     setStartPoint(latlng)
@@ -34,8 +38,37 @@ export default function Home() {
     )
   }
 
-  const handleFindRoutes = () => {
-    console.log({ startPoint, distance, activity, vibes })
+  const fetchRoute = async (s: number) => {
+    if (!startPoint) return
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start: [startPoint[1], startPoint[0]], // flip [lat,lng] → [lng,lat] for ORS
+          distanceKm: distance,
+          activity,
+          seed: s,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Routing failed')
+      setRouteCoords(data.coordinates)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleFindRoutes = () => fetchRoute(seed)
+
+  const handleRegenerate = () => {
+    const next = seed + 1
+    setSeed(next)
+    fetchRoute(next)
   }
 
   return (
@@ -45,6 +78,7 @@ export default function Home() {
           startPoint={startPoint}
           onMapClick={handleMapClick}
           flyTo={flyTo}
+          routeCoords={routeCoords}
         />
       </div>
       <InputPanel
@@ -55,8 +89,12 @@ export default function Home() {
         setActivity={setActivity}
         vibes={vibes}
         setVibes={setVibes}
+        hasRoute={routeCoords !== null}
+        loading={loading}
+        error={error}
         onUseMyLocation={handleUseMyLocation}
         onFindRoutes={handleFindRoutes}
+        onRegenerate={handleRegenerate}
       />
     </div>
   )
