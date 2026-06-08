@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic'
 import { useState, useCallback } from 'react'
 import InputPanel from '@/components/InputPanel'
+import type { RouteStatsData } from '@/components/RouteStats'
 
 const MapView = dynamic(() => import('@/components/MapView'), {
   ssr: false,
@@ -17,6 +18,8 @@ export default function Home() {
   const [vibes, setVibes] = useState<string[]>([])
   const [seed, setSeed] = useState(1)
   const [routeCoords, setRouteCoords] = useState<[number, number][] | null>(null)
+  const [routeStats, setRouteStats] = useState<RouteStatsData | null>(null)
+  const [unit, setUnit] = useState<'km' | 'mi'>('km')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -51,11 +54,19 @@ export default function Home() {
           distanceKm: distance,
           activity,
           seed: s,
+          vibes,
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Routing failed')
       setRouteCoords(data.coordinates)
+      setRouteStats({
+        distanceM: data.distanceM,
+        durationS: data.durationS,
+        elevationM: data.elevationM,
+        climbM: data.climbM,
+        verdict: data.verdict,
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong')
     } finally {
@@ -66,7 +77,7 @@ export default function Home() {
   const handleFindRoutes = () => fetchRoute(seed)
 
   const handleRegenerate = () => {
-    const next = seed + 1
+    const next = seed + 4 // advance by the candidate window size
     setSeed(next)
     fetchRoute(next)
   }
@@ -92,6 +103,9 @@ export default function Home() {
         hasRoute={routeCoords !== null}
         loading={loading}
         error={error}
+        routeStats={routeStats}
+        unit={unit}
+        onToggleUnit={() => setUnit((u) => (u === 'km' ? 'mi' : 'km'))}
         onUseMyLocation={handleUseMyLocation}
         onFindRoutes={handleFindRoutes}
         onRegenerate={handleRegenerate}

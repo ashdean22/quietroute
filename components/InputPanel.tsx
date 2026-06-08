@@ -1,5 +1,7 @@
 'use client'
 
+import RouteStats, { type RouteStatsData } from '@/components/RouteStats'
+
 const VIBES = ['Flat', 'Shaded', 'Low-traffic', 'Quiet'] as const
 
 interface InputPanelProps {
@@ -13,6 +15,9 @@ interface InputPanelProps {
   hasRoute: boolean
   loading: boolean
   error: string | null
+  routeStats: RouteStatsData | null
+  unit: 'km' | 'mi'
+  onToggleUnit: () => void
   onUseMyLocation: () => void
   onFindRoutes: () => void
   onRegenerate: () => void
@@ -29,6 +34,9 @@ export default function InputPanel({
   hasRoute,
   loading,
   error,
+  routeStats,
+  unit,
+  onToggleUnit,
   onUseMyLocation,
   onFindRoutes,
   onRegenerate,
@@ -136,7 +144,7 @@ export default function InputPanel({
           {loading ? (
             <>
               <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              Finding route...
+              Finding best route…
             </>
           ) : (
             'Find routes'
@@ -153,6 +161,10 @@ export default function InputPanel({
           </button>
         )}
       </div>
+
+      {routeStats && (
+        <RouteStats stats={routeStats} unit={unit} onToggleUnit={onToggleUnit} />
+      )}
     </aside>
   )
 }
