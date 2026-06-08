@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { Pool } from 'pg'
 import { config } from 'dotenv'
@@ -7,10 +7,18 @@ config({ path: '.env.local' })
 
 async function main() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL })
-  const sql = readFileSync(join(process.cwd(), 'db/001_schema.sql'), 'utf-8')
+  const dbDir = join(process.cwd(), 'db')
+  const files = readdirSync(dbDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort() // alphabetical order = chronological (001_, 002_, …)
+
   try {
-    await pool.query(sql)
-    console.log('Migration applied successfully.')
+    for (const file of files) {
+      const sql = readFileSync(join(dbDir, file), 'utf-8')
+      console.log(`Applying ${file}…`)
+      await pool.query(sql)
+    }
+    console.log('All migrations applied.')
   } finally {
     await pool.end()
   }

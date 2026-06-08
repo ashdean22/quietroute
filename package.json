@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "migrate": "tsx scripts/migrate.ts",
-    "ingest": "tsx scripts/ingest-osm.ts"
+    "ingest": "tsx scripts/ingest-osm.ts",
+    "ingest:greenspaces": "tsx scripts/ingest-greenspaces.ts",
+    "score": "python3 scripts/score-segments.py"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
