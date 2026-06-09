@@ -1,11 +1,17 @@
 'use client'
 
+import type { WeatherData } from '@/app/api/route/route'
+
+export type { WeatherData }
+
 export interface RouteStatsData {
   distanceM: number
   durationS: number
   elevationM: number[]
   climbM: number
   verdict: string
+  vibeScores?: { flat: number; shaded: number; low_traffic: number; quiet: number }
+  weather?: WeatherData | null
 }
 
 interface RouteStatsProps {

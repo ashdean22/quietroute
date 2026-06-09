@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 
 const ORS_BASE = 'https://api.openrouteservice.org/v2/directions'
+const OPEN_METEO = 'https://api.open-meteo.com/v1/forecast'
 
 const PROFILES: Record<string, string> = {
   run: 'foot-walking',
@@ -35,7 +36,8 @@ function flatScore(climbM: number): number {
 function combinedScore(
   segVibes: { quiet: number; low_traffic: number; shaded: number },
   flatSc: number,
-  selectedVibes: string[]
+  selectedVibes: string[],
+  weights: Record<string, number> = {}
 ): number {
   const all: Record<string, number> = {
     flat: flatSc,
@@ -47,7 +49,8 @@ function combinedScore(
     selectedVibes.length > 0
       ? selectedVibes.map((v) => VIBE_KEY[v]).filter(Boolean)
       : Object.keys(all)
-  return keys.reduce((sum, k) => sum + (all[k] ?? 50), 0) / keys.length
+  const totalW = keys.reduce((s, k) => s + (weights[k] ?? 1), 0)
+  return keys.reduce((s, k) => s + (all[k] ?? 50) * (weights[k] ?? 1), 0) / totalW
 }
 
 function buildVerdict(
@@ -81,6 +84,67 @@ function downsample(arr: number[], maxLen: number): number[] {
   if (arr.length <= maxLen) return arr
   const step = (arr.length - 1) / (maxLen - 1)
   return Array.from({ length: maxLen }, (_, i) => arr[Math.round(i * step)])
+}
+
+// ── Open-Meteo weather ────────────────────────────────────────────────────────
+
+export interface WeatherData {
+  currentTemp: number
+  feelsLike: number
+  precip: number
+  windSpeed: number
+  goodToRun: boolean
+  bestTimeChip: string
+}
+
+async function fetchWeather(lat: number, lng: number): Promise<WeatherData | null> {
+  try {
+    const url =
+      `${OPEN_METEO}?latitude=${lat}&longitude=${lng}` +
+      `&current=temperature_2m,apparent_temperature,precipitation,wind_speed_10m` +
+      `&hourly=apparent_temperature,precipitation_probability,wind_speed_10m` +
+      `&forecast_days=1&timezone=auto`
+    const res = await fetch(url, { next: { revalidate: 0 } })
+    if (!res.ok) return null
+    const data = await res.json()
+
+    const cur = data.current
+    const goodToRun =
+      cur.precipitation < 0.5 &&
+      cur.apparent_temperature >= 5 &&
+      cur.apparent_temperature <= 28 &&
+      cur.wind_speed_10m < 25
+
+    // Find best future hour (lowest composite penalty)
+    const now = Date.now()
+    let bestHour = -1
+    let bestScore = Infinity
+    for (let i = 0; i < 24; i++) {
+      if (new Date(data.hourly.time[i]).getTime() <= now) continue
+      const ap = data.hourly.apparent_temperature[i]
+      const pp = data.hourly.precipitation_probability[i]
+      const ws = data.hourly.wind_speed_10m[i]
+      const s = pp + Math.max(0, ap - 22) + Math.max(0, 10 - ap) + ws
+      if (s < bestScore) { bestScore = s; bestHour = new Date(data.hourly.time[i]).getHours() }
+    }
+
+    const bestTimeChip = goodToRun
+      ? 'Good to go now!'
+      : bestHour >= 0
+        ? `Best: ${bestHour}:00–${bestHour + 1}:00`
+        : 'Check forecast'
+
+    return {
+      currentTemp: Math.round(cur.temperature_2m),
+      feelsLike:   Math.round(cur.apparent_temperature),
+      precip:      cur.precipitation,
+      windSpeed:   Math.round(cur.wind_speed_10m),
+      goodToRun,
+      bestTimeChip,
+    }
+  } catch {
+    return null
+  }
 }
 
 // ── ORS fetch ─────────────────────────────────────────────────────────────────
@@ -185,18 +249,23 @@ export async function POST(req: NextRequest) {
   if (!apiKey)
     return NextResponse.json({ error: 'ORS API key not configured' }, { status: 500 })
 
-  const { start, distanceKm, activity, seed, vibes = [] } = await req.json()
+  const { start, distanceKm, activity, seed, vibes = [], vibeWeights = {} } = await req.json()
 
   if (!start || !distanceKm || !activity)
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
 
   const profile = PROFILES[activity] ?? 'foot-walking'
   const seeds = [seed, seed + 1, seed + 2, seed + 3]
+  // start is [lng, lat] for ORS; Open-Meteo needs lat/lng
+  const [startLng, startLat] = start as [number, number]
 
-  // 1. Fetch 4 ORS candidates in parallel; keep successful ones
-  const settled = await Promise.allSettled(
-    seeds.map((s) => fetchOrsCandidate(apiKey, profile, start, distanceKm, s))
-  )
+  // 1. Fetch 4 ORS candidates + weather in parallel
+  const [settled, weather] = await Promise.all([
+    Promise.allSettled(
+      seeds.map((s) => fetchOrsCandidate(apiKey, profile, start, distanceKm, s))
+    ),
+    fetchWeather(startLat, startLng),
+  ])
   const candidates = settled
     .filter((r): r is PromiseFulfilledResult<OrsCandidate> => r.status === 'fulfilled')
     .map((r) => r.value)
@@ -211,7 +280,7 @@ export async function POST(req: NextRequest) {
     candidates.map(async (c) => {
       const segVibes = await scoreViaPostgis(c.routeGeojson)
       const flat = flatScore(c.climbM)
-      const score = combinedScore(segVibes, flat, vibes)
+      const score = combinedScore(segVibes, flat, vibes, vibeWeights)
       return { ...c, segVibes, flatSc: flat, score }
     })
   )
@@ -234,5 +303,6 @@ export async function POST(req: NextRequest) {
     climbM:      winner.climbM,
     vibeScores:  allScores,
     verdict:     buildVerdict(allScores, winner.climbM, vibes),
+    weather,
   })
 }

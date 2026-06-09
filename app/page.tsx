@@ -1,9 +1,11 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useState, useCallback } from 'react'
-import InputPanel from '@/components/InputPanel'
+import { useState, useCallback, useEffect } from 'react'
+import InputPanel, { type SavedRoute } from '@/components/InputPanel'
 import type { RouteStatsData } from '@/components/RouteStats'
+import { getDeviceId } from '@/lib/deviceId'
+import { getWeights, nudgeWeights } from '@/lib/vibeWeights'
 
 const MapView = dynamic(() => import('@/components/MapView'), {
   ssr: false,
@@ -22,6 +24,32 @@ export default function Home() {
   const [unit, setUnit] = useState<'km' | 'mi'>('km')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Day 6
+  const [deviceId, setDeviceId] = useState('')
+  const [hasRated, setHasRated] = useState(false)
+  const [hasSaved, setHasSaved] = useState(false)
+  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([])
+  const [activeTab, setActiveTab] = useState<'plan' | 'saved'>('plan')
+
+  // Init device ID and load saved routes on mount
+  useEffect(() => {
+    const id = getDeviceId()
+    setDeviceId(id)
+    loadSavedRoutes(id)
+  }, [])
+
+  const loadSavedRoutes = async (id: string) => {
+    if (!id) return
+    try {
+      const res = await fetch(`/api/saved?deviceId=${id}`)
+      if (res.ok) {
+        const data = await res.json()
+        setSavedRoutes(data.routes)
+      }
+    } catch {
+      // non-critical
+    }
+  }
 
   const handleMapClick = useCallback((latlng: [number, number]) => {
     setStartPoint(latlng)
@@ -45,27 +73,33 @@ export default function Home() {
     if (!startPoint) return
     setLoading(true)
     setError(null)
+    setHasRated(false)
+    setHasSaved(false)
     try {
+      const weights = getWeights()
       const res = await fetch('/api/route', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          start: [startPoint[1], startPoint[0]], // flip [lat,lng] → [lng,lat] for ORS
+          start: [startPoint[1], startPoint[0]], // [lat,lng] → [lng,lat] for ORS
           distanceKm: distance,
           activity,
           seed: s,
           vibes,
+          vibeWeights: weights,
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Routing failed')
       setRouteCoords(data.coordinates)
       setRouteStats({
-        distanceM: data.distanceM,
-        durationS: data.durationS,
+        distanceM:  data.distanceM,
+        durationS:  data.durationS,
         elevationM: data.elevationM,
-        climbM: data.climbM,
-        verdict: data.verdict,
+        climbM:     data.climbM,
+        verdict:    data.verdict,
+        vibeScores: data.vibeScores,
+        weather:    data.weather ?? null,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong')
@@ -77,9 +111,68 @@ export default function Home() {
   const handleFindRoutes = () => fetchRoute(seed)
 
   const handleRegenerate = () => {
-    const next = seed + 4 // advance by the candidate window size
+    const next = seed + 4
     setSeed(next)
     fetchRoute(next)
+  }
+
+  const handleRate = async (thumb: 'up' | 'down') => {
+    if (!routeStats || !routeCoords || hasRated) return
+    setHasRated(true)
+
+    // Nudge local weights first (immediate feedback)
+    if (routeStats.vibeScores) {
+      nudgeWeights(thumb, routeStats.vibeScores)
+    }
+
+    // Persist to DB (fire-and-forget; failure is silent)
+    fetch('/api/rate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId,
+        vibes,
+        vibeScores: routeStats.vibeScores,
+        score: routeStats.vibeScores
+          ? Object.values(routeStats.vibeScores).reduce((s, v) => s + v, 0) /
+            Object.values(routeStats.vibeScores).length
+          : null,
+        thumb,
+      }),
+    }).catch(() => {})
+  }
+
+  const handleSaveRoute = async () => {
+    if (!routeStats || !routeCoords || hasSaved) return
+    setHasSaved(true)
+    try {
+      await fetch('/api/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId,
+          coordinates: routeCoords,
+          distanceM: routeStats.distanceM,
+          vibeMix: routeStats.vibeScores ?? null,
+          label: null,
+        }),
+      })
+      // Refresh saved list
+      loadSavedRoutes(deviceId)
+    } catch {
+      setHasSaved(false)
+    }
+  }
+
+  const handleLoadSavedRoute = (route: SavedRoute) => {
+    setRouteCoords(route.coordinates)
+    setRouteStats(null) // clear stats — this is just a view
+    setActiveTab('plan')
+  }
+
+  const handleTabChange = (tab: 'plan' | 'saved') => {
+    setActiveTab(tab)
+    if (tab === 'saved') loadSavedRoutes(deviceId)
   }
 
   return (
@@ -109,6 +202,14 @@ export default function Home() {
         onUseMyLocation={handleUseMyLocation}
         onFindRoutes={handleFindRoutes}
         onRegenerate={handleRegenerate}
+        onRate={handleRate}
+        onSaveRoute={handleSaveRoute}
+        hasRated={hasRated}
+        hasSaved={hasSaved}
+        savedRoutes={savedRoutes}
+        onLoadSavedRoute={handleLoadSavedRoute}
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
       />
     </div>
   )
